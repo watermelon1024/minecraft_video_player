@@ -1,19 +1,19 @@
 """
 video_utils.py
 
-功能摘要：
-- 使用 OpenCV 讀取影片 metadata（width, height, fps, frame_count, duration）
-- 互動式詢問是否要改變 size / fps
-- 偵測 ffmpeg（shutil.which），若不存在詢問使用者輸入 ffmpeg 可執行檔路徑並驗證
-- 若可用 ffmpeg，使用 ffmpeg 處理 scale + fps 並以 pipe (rawvideo bgr24) 傳回 Python，否則使用 cv2 完成相同工作
-- 不保留輸出影片檔（僅 stream frames）
-- 每一幀以 numpy.ndarray (BGR) 提供給 user_callback(frame, frame_index, timestamp_sec)
-- 使用 ThreadPoolExecutor dispatch frame 處理（可設定 worker 數）
-- CLI friendly：可直接用 process_video_cli("path/to/video.mp4")
+Summary:
+- Reads video metadata (width, height, fps, frame_count, duration) using OpenCV.
+- Interactively asks whether to change size / fps.
+- Detects ffmpeg (shutil.which). If not found, asks the user for the ffmpeg executable path and verifies it.
+- If ffmpeg is available, uses it to handle scale + fps and streams frames back to Python via pipe (rawvideo bgr24). Otherwise, falls back to cv2.
+- Does not save an output video file (streams frames only).
+- Provides each frame as a numpy.ndarray (BGR) to user_callback(frame, frame_index, timestamp_sec).
+- Uses ThreadPoolExecutor to dispatch frame processing (worker count is configurable).
+- CLI friendly: Can be used directly via process_video_cli("path/to/video.mp4").
 
-注意：
-- 需安裝 opencv-python
-- ffmpeg 若存在則效能最好；若不存在，cv2 fallback 仍能工作（但跳時間定位可能較慢）
+Notes:
+- Requires opencv-python.
+- Performance is best if ffmpeg is present; if not, the cv2 fallback still works (but seeking might be slower).
 """
 
 import json

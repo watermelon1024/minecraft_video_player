@@ -4,7 +4,7 @@ from nbtlib.tag import Byte, Compound, Double, Int, List, String
 
 def convert_to_nbt(value):
     """
-    將 JSON 字串解析並轉換為 NBT 結構
+    Parses JSON-like structures and converts them to NBT structure.
     """
     if isinstance(value, dict):
         return Compound({k: convert_to_nbt(v) for k, v in value.items()})
@@ -24,23 +24,23 @@ def convert_to_nbt(value):
 
 def create_frame_structure(filename: str, raw_json, data_version: int = 3465):
     """
-    filename: 輸出的檔案名稱 (例如 "frame_001.nbt")
-    frame_json_string: 您那串巨大的 JSON 像素文字
-    data_version: Minecraft 版本號 (3465 是 1.20.1，這很重要，舊版本號可能導致讀取失敗)
+    filename: Output filename (e.g., "frame_001.nbt")
+    raw_json: The JSON pixel text data
+    data_version: Minecraft version number (3465 is 1.20.1; important for compatibility)
     """
 
-    # 1. 定義 Marker 實體
-    # 這就是我們用來存放數據的載體
+    # 1. Define Marker Entity
+    # This is the carrier for our data
     marker_entity = Compound(
         {
-            "pos": List[Double]([0.5, 0.5, 0.5]),  # 實體位於結構中心
-            "blockPos": List[Int]([0, 0, 0]),  # 對應的方塊座標
+            "pos": List[Double]([0.5, 0.5, 0.5]),  # Entity at center of structure
+            "blockPos": List[Int]([0, 0, 0]),  # Corresponding block coordinates
             "nbt": Compound(
                 {
-                    "id": String("minecraft:marker"),  # 實體類型
+                    "id": String("minecraft:marker"),  # Entity type
                     "Tags": List[String](["video_player", "frame_data"]),
-                    # --- 關鍵部分 ---
-                    # 我們在 marker 身上自定義一個 "frame" 標籤來存文字
+                    # --- Key Part ---
+                    # We define a custom "frame" tag on the marker to store text
                     "data": Compound({"frame": List(convert_to_nbt(raw_json))}),
                     # ---------------
                 }
@@ -48,29 +48,29 @@ def create_frame_structure(filename: str, raw_json, data_version: int = 3465):
         }
     )
 
-    # 2. 定義結構檔案 (Structure Format)
-    # 這是 Minecraft 結構方塊的標準格式，必須包含 size, entities, blocks, palette 等
+    # 2. Define Structure File (Structure Format)
+    # Standard format for Minecraft structure blocks, must include size, entities, blocks, palette, etc.
     structure_file = Compound(
         {
-            "size": List[Int]([1, 1, 1]),  # 結構大小 1x1x1
+            "size": List[Int]([1, 1, 1]),  # Structure size 1x1x1
             "entities": List[Compound]([marker_entity]),
-            "blocks": List[Compound]([]),  # 我們不需要方塊，所以留空
+            "blocks": List[Compound]([]),  # No blocks needed, so empty
             "palette": List[Compound](
-                [Compound({"Name": String("minecraft:air")})]  # 即使沒有方塊，通常也需要一個空的調色盤定義
+                [Compound({"Name": String("minecraft:air")})]  # Empty palette definition is usually required
             ),
-            "DataVersion": Int(data_version),  # 這一行非常重要！
+            "DataVersion": Int(data_version),  # This line is very important!
         }
     )
 
-    # 3. 儲存檔案 (必須使用 Gzip 壓縮)
+    # 3. Save File (Must use Gzip compression)
     file = nbtlib.File(structure_file)
     file.save(filename, gzipped=True)
-    print(f"已生成: {filename}")
+    print(f"Generated: {filename}")
 
 
 if __name__ == "__main__":
-    # --- 使用範例 ---
+    # --- Usage Example ---
     raw_json = [{"text": ""}, {"text": "█", "color": "#FF0000"}, {"text": "█", "color": "#00FF00"}]
 
-    # 生成 frame001.nbt
+    # Generate frame001.nbt
     create_frame_structure("frame_001.nbt", raw_json)
