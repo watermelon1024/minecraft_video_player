@@ -18,50 +18,39 @@ def processing_callback(frame: FrameData, index: FrameIndex, timestamp: Timestam
     Splits a single frame into multiple small tiles < 256x256 and saves them.
     Filename format: assets/minecraft/textures/font/f{index}_r{row}_c{col}.png
     """
-
-    # Get original dimensions
     h, w, _ = frame.shape
 
-    # Calculate rows and columns needed (Ceiling division)
+    # Ceiling division
     cols = math.ceil(w / MAX_W)
     rows = math.ceil(h / MAX_H)
 
-    # Ensure output directory exists
     output_dir = "frame"
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- Start slicing and saving ---
     for r in range(rows):
         for c in range(cols):
-            # Calculate crop range
             x_start = c * MAX_W
             y_start = r * MAX_H
             x_end = min(x_start + MAX_W, w)
             y_end = min(y_start + MAX_H, h)
 
-            # [Core] Slice using NumPy (very fast)
-            # frame[y:y, x:x]
+            # NumPy slicing is efficient
             tile = frame[y_start:y_end, x_start:x_end]
 
-            # Save file
-            # Filename example: f0_r0_c0.png
             filepath = os.path.join(output_dir, f"f{index}_r{r}_c{c}.png")
-
-            # Save using cv2 (default compression is fine)
             cv2.imwrite(filepath, tile)
 
 
 def finish_callback(meta: VideoMetadata):
     """
-    Generates custom font json and text_display init mcfunction based on total frames and dimensions.
+    Generates custom font json and text_display init mcfunction.
     Uses 1 px = 0.025 blocks measurement for automatic alignment.
     """
-
     target_w = meta["width"]
     target_h = meta["height"]
     fps = meta["fps"]
     total_frames = meta["frame_count"]
-    # Calculate rows and columns
+
     cols = math.ceil(target_w / MAX_W)
     rows = math.ceil(target_h / MAX_H)
 
@@ -75,15 +64,14 @@ def finish_callback(meta: VideoMetadata):
         for r in range(rows):
             current_h = min((r + 1) * MAX_H, target_h) - (r * MAX_H)
             for c in range(cols):
-                # Set Ascent to 0
-                # This means the baseline is at the top of the image.
-                # The image will render downwards from the entity's Y coordinate for current_h length.
+                # Ascent=0 aligns the image top to the baseline.
+                # The image renders downwards from the entity's Y.
                 fonts.setdefault(f"frame_r{r}_c{c}", []).append(
                     {
                         "type": "bitmap",
                         "file": f"video:frame/f{i}_r{r}_c{c}.png",
-                        "ascent": 0,  # Top aligned
-                        "height": current_h,  # Actual pixel height
+                        "ascent": 0,
+                        "height": current_h,
                         "chars": [chr(start_char + i)],
                     }
                 )
@@ -99,30 +87,21 @@ def finish_callback(meta: VideoMetadata):
 
     # --- 2. Output summon commands (Row-based) ---
     print("[Info] Generating summon commands...")
-    # # Calculate total width (for centering)
-    # total_width_blocks = target_w * PIXEL_SCALE
 
-    # # Start X: Shift left by half of total width
-    # trans_x = -(total_width_blocks / 2)
-
-    # Start Y: Since ascent=0 means image grows downwards, place the first row at the highest point.
-    # Assuming feet at 0, screen bottom aligned with eye height (1.6), or floating.
-    # Here set as: Top of first row at Y + total height (so screen bottom is approx at Y=0).
+    # Ascent=0 means image grows downwards.
+    # Place the first row at Y + total height so the bottom aligns with Y=0.
     total_height_blocks = target_h * PIXEL_SCALE
     start_y = total_height_blocks
 
     init_cmds: list[str] = []
 
-    # Generate one entity per row
     for r in range(rows):
-        # 1. Calculate Y coordinate for this row
-        # Since each row is fully 256px high (except the last one, but its start is relative to previous end)
-        # And ascent=0, so next row start is Current_Y - 6.4
+        # Each row is 256px high (6.4 blocks).
+        # Next row starts 6.4 blocks lower.
         trans_y = start_y - (r * ROW_HEIGHT_BLOCKS)
 
-        # 3. Generate initialization text for this row (placeholder, replaced during playback)
-        # We don't need to know Unicode here, as that's playback logic.
-        # But for testing, we can insert the character for the first frame.
+        # Placeholder text for initialization.
+        # Unicode characters are swapped during playback.
         cmd = (
             "summon minecraft:text_display ~ ~ ~ "
             '{Tags:["video_player","frame"],'
@@ -147,7 +126,7 @@ def finish_callback(meta: VideoMetadata):
     init_cmds.append(f"scoreboard players set end_frame video_player {total_frames - 1}")
 
     # audio segment time (seconds)
-    segment_time = 10  # seconds
+    segment_time = 10
     init_cmds.append(f"scoreboard players set audio_segment video_player {int(segment_time * fps)}")
 
     mcfunction_dir = "dtp/function"
@@ -168,7 +147,6 @@ def finish_callback(meta: VideoMetadata):
         )
     print(f"[Done] Generated play frame commands: {play_loop_path}")
 
-    # -- Sounds JSON generation is moved to sound.py ---
     sounds_dir = os.path.join("res", "sounds")
     audio_files = segment_audio(meta["path"], sounds_dir, segment_time=segment_time)
     generate_segmented_sounds_json(audio_files, namespace="video")
