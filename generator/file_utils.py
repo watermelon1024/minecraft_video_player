@@ -4,7 +4,7 @@ import shutil
 import threading
 import zipfile
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 
@@ -59,7 +59,7 @@ class PackGenerator:
                 self.zf.close()
             print(f"[PackGen] Closed Zip stream: {self.output_path}")
 
-    def write_image(self, rel_path, image_data):
+    def write_image(self, rel_path: str, image_data: cv2.typing.MatLike):
         """
         Encodes and writes an image (Thread-Safe).
         :param rel_path: Relative path in pack (e.g., assets/minecraft/textures/font/x.png).
@@ -89,7 +89,7 @@ class PackGenerator:
             with open(full_path, "wb") as f:
                 f.write(bytes_data)
 
-    def write_text(self, rel_path, content):
+    def write_text(self, rel_path: str, content: str):
         """Thread-safe text write."""
         rel_path = rel_path.replace("\\", "/")
 
@@ -103,11 +103,11 @@ class PackGenerator:
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
-    def write_json(self, rel_path, data_dict, **kwargs):
-        json_str = json.dumps(data_dict, separators=(",", ":"), ensure_ascii=False, **kwargs)
+    def write_json(self, rel_path: str, data: Any, **kwargs):
+        json_str = json.dumps(data, separators=(",", ":"), ensure_ascii=False, **kwargs)
         self.write_text(rel_path, json_str)
 
-    def write_file_from_disk(self, rel_path, source_path):
+    def write_file_from_disk(self, rel_path: str, source_path: str):
         """Thread-safe file copy from disk."""
         rel_path = rel_path.replace("\\", "/")
 

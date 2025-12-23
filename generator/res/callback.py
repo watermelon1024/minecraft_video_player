@@ -1,9 +1,8 @@
-import json
 import math
 import os
+from tempfile import TemporaryDirectory
 
-import cv2
-
+from ..file_utils import PackGenerator
 from ..video_utils import FrameData, FrameIndex, TimestampSec, VideoMetadata
 from .audio import generate_segmented_sounds_json, segment_audio
 
@@ -13,19 +12,18 @@ PIXEL_SCALE = 0.025  # 1 px = 0.025 blocks
 ROW_HEIGHT_BLOCKS = MAX_H * PIXEL_SCALE  # 6.4
 
 
-def processing_callback(frame: FrameData, index: FrameIndex, timestamp: TimestampSec):
+def processing_callback(
+    frame: FrameData, index: FrameIndex, timestamp: TimestampSec, resourcepack: PackGenerator
+):
     """
     Splits a single frame into multiple small tiles < 256x256 and saves them.
-    Filename format: assets/minecraft/textures/font/f{index}_r{row}_c{col}.png
+    Filename format: assets/video/textures/frame/{frame}_{row}_{col}.png
     """
     h, w, _ = frame.shape
 
     # Ceiling division
     cols = math.ceil(w / MAX_W)
     rows = math.ceil(h / MAX_H)
-
-    output_dir = "frame"
-    os.makedirs(output_dir, exist_ok=True)
 
     for r in range(rows):
         for c in range(cols):
@@ -37,11 +35,11 @@ def processing_callback(frame: FrameData, index: FrameIndex, timestamp: Timestam
             # NumPy slicing is efficient
             tile = frame[y_start:y_end, x_start:x_end]
 
-            filepath = os.path.join(output_dir, f"f{index}_r{r}_c{c}.png")
-            cv2.imwrite(filepath, tile)
+            filepath = os.path.join("assets/video/textures/frame", f"{index}_{r}_{c}.png")
+            resourcepack.write_image(filepath, tile)
 
 
-def finish_callback(meta: VideoMetadata):
+def finish_callback(meta: VideoMetadata, datapack: PackGenerator, resourcepack: PackGenerator):
     """
     Generates custom font json and text_display init mcfunction.
     Uses 1 px = 0.025 blocks measurement for automatic alignment.
@@ -66,24 +64,21 @@ def finish_callback(meta: VideoMetadata):
             for c in range(cols):
                 # Ascent=0 aligns the image top to the baseline.
                 # The image renders downwards from the entity's Y.
-                fonts.setdefault(f"frame_r{r}_c{c}", []).append(
+                fonts.setdefault(f"frame_{r}_{c}", []).append(
                     {
                         "type": "bitmap",
-                        "file": f"video:frame/f{i}_r{r}_c{c}.png",
+                        "file": f"video:frame/{i}_{r}_{c}.png",
                         "ascent": 0,
                         "height": current_h,
                         "chars": [chr(start_char + i)],
                     }
                 )
 
-    font_dir = "res/font"
-    os.makedirs(font_dir, exist_ok=True)
     for name, providers in fonts.items():
-        json_path = os.path.join(font_dir, f"{name}.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump({"providers": providers}, f, separators=(",", ":"), ensure_ascii=False)
+        json_path = os.path.join("assets/video/font", f"{name}.json")
+        resourcepack.write_json(json_path, {"providers": providers})
 
-    print(f"[Done] Generated resource pack config: {font_dir}")
+    print("[Done] Generated resource pack config: assets/video/font")
 
     # --- 2. Output summon commands (Row-based) ---
     print("[Info] Generating summon commands...")
@@ -120,7 +115,7 @@ def finish_callback(meta: VideoMetadata):
 
     # --- 3. Generate frame Unicode mapping table ---
     frames_unicode = ",".join(f'"\\u{start_char + i:04x}"' for i in range(total_frames))
-    init_cmds.insert(0, "data merge storage video_player:frame {frames:[%s]}" % frames_unicode)
+    init_cmds.append("data merge storage video_player:frame {frames:[%s]}" % frames_unicode)
 
     init_cmds.append("scoreboard players set frame video_player 0")
     init_cmds.append(f"scoreboard players set end_frame video_player {total_frames - 1}")
@@ -129,24 +124,25 @@ def finish_callback(meta: VideoMetadata):
     segment_time = 10
     init_cmds.append(f"scoreboard players set audio_segment video_player {int(segment_time * fps)}")
 
-    mcfunction_dir = "dtp/function"
-    os.makedirs(mcfunction_dir, exist_ok=True)
+    mcfunction_dir = "data/video_player/function"
 
     init_path = os.path.join(mcfunction_dir, "init.mcfunction")
-    with open(init_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(init_cmds))
+    datapack.write_text(init_path, "\n".join(init_cmds))
     print(f"[Done] Generated init commands: {init_path}")
 
     play_loop_path = os.path.join(mcfunction_dir, "play_frame.mcfunction")
-    with open(play_loop_path, "w", encoding="utf-8") as f:
-        f.write(
-            "\n".join(
-                f"$data modify entity @s text.extra[{c * 2}].text set from storage video_player:frame frames[$(frame)]"
-                for c in range(cols)
-            )
-        )
+    datapack.write_text(
+        play_loop_path,
+        "\n".join(
+            f"$data modify entity @s text.extra[{c * 2}].text set from storage video_player:frame frames[$(frame)]"
+            for c in range(cols)
+        ),
+    )
     print(f"[Done] Generated play frame commands: {play_loop_path}")
 
-    sounds_dir = os.path.join("res", "sounds")
-    audio_files = segment_audio(meta["path"], sounds_dir, segment_time=segment_time)
-    generate_segmented_sounds_json(audio_files, namespace="video")
+    with TemporaryDirectory() as tmpdir:
+        audio_files = segment_audio(meta["path"], tmpdir, segment_time=segment_time)
+        for filename in audio_files:
+            source_path = os.path.join(tmpdir, filename)
+            resourcepack.write_file_from_disk(f"assets/video/sounds/{filename}", source_path)
+        generate_segmented_sounds_json(audio_files, resourcepack, namespace="video")

@@ -1,6 +1,7 @@
-import json
 import os
 import subprocess
+
+from ..file_utils import PackGenerator
 
 
 def segment_audio(input_video: str, output_dir: str, segment_time: int = 10):
@@ -31,7 +32,7 @@ def segment_audio(input_video: str, output_dir: str, segment_time: int = 10):
     return files
 
 
-def generate_segmented_sounds_json(files: list[str], namespace: str = "video"):
+def generate_segmented_sounds_json(files: list[str], resourcepack: PackGenerator, namespace: str = "video"):
     sounds_data = {}
     for i in range(len(files)):
         sound_event = f"part_{i}"
@@ -45,7 +46,5 @@ def generate_segmented_sounds_json(files: list[str], namespace: str = "video"):
             ],
         }
 
-    json_path = os.path.join("res", "sounds.json")
-
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(sounds_data, f, indent=2)
+    json_path = os.path.join("assets/video", "sounds.json")
+    resourcepack.write_json(json_path, sounds_data)
