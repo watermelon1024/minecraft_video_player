@@ -2,6 +2,8 @@ import math
 import os
 from tempfile import TemporaryDirectory
 
+from .subtitle import generate_subtitle_function
+
 from ..file_utils import PackGenerator
 from ..video_utils import FrameData, FrameIndex, TimestampSec, VideoMetadata
 from .audio import generate_segmented_sounds_json, segment_audio
@@ -129,6 +131,11 @@ def finish_callback(meta: VideoMetadata, datapack: PackGenerator, resourcepack: 
             'tellraw @p ["","Your target FPS is not 20; you need to execute ",{text:"/tick rate %d",bold:true,color:"gold",click_event:{action:"suggest_command",command:"/tick rate %d"}}," to fit the correct playback speed. (Or ",{text:"[Click Here]",color:"gold",click_event:{action:"run_command",command:"tick rate %d"}}," to execute.)"]'
             % (fps, fps, fps)
         )
+
+    # subtitle init
+    subtitle_path = "subtitle.srt"
+    if os.path.exists(subtitle_path):
+        init_cmds.append(generate_subtitle_function(subtitle_path, fps, datapack))
 
     mcfunction_dir = "data/video_player/function"
 
