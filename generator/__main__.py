@@ -23,18 +23,33 @@ if __name__ == "__main__":
     # Resource pack options
     parser.add_argument("-nr", "--no-resourcepack", action="store_true", help="Do not generate resource pack")
 
+    # Output filename option
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Base name for output files (e.g. 'myvideo' -> 'myvideo_datapack', 'myvideo_resourcepack')",
+    )
+
     args = parser.parse_args()
 
     video_file = args.video_file
     is_zip = args.zip
     no_resourcepack = args.no_resourcepack
+    output_base = args.output
 
     if no_resourcepack:
         raise NotImplementedError("Datapack-only generation is not yet supported.")
 
     mode = PackMode.ZIP if is_zip else PackMode.FOLDER
-    datapack_name = "datapack.zip" if is_zip else "datapack"
-    resourcepack_name = "resourcepack.zip" if is_zip else "resourcepack"
+
+    datapack_name = "datapack"
+    resourcepack_name = "resourcepack"
+    if output_base:
+        datapack_name = f"{output_base}_datapack"
+        resourcepack_name = f"{output_base}_resourcepack"
+    if is_zip:
+        datapack_name += ".zip"
+        resourcepack_name += ".zip"
 
     with PackGenerator(
         datapack_name, template_path="template/datapack", mode=mode
