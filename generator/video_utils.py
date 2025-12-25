@@ -10,10 +10,8 @@ Summary:
 - Uses ThreadPoolExecutor for parallel frame processing.
 """
 
-import json
 import math
 import os
-import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,6 +19,8 @@ from typing import Any, Callable, Generator, Optional, Tuple, TypedDict
 
 import cv2
 import numpy as np
+
+from .ffmpeg_utils import find_ffmpeg, verify_ffmpeg
 
 
 class VideoMetadata(TypedDict):
@@ -40,7 +40,7 @@ FrameInfo = Tuple[FrameData, FrameIndex, TimestampSec]
 
 
 # ---------------------------
-# Helpers: metadata & ffmpeg
+# Helpers: metadata
 # ---------------------------
 def get_metadata_cv2(path: str) -> VideoMetadata:
     """Lazy metadata read via cv2."""
@@ -65,43 +65,79 @@ def get_metadata_cv2(path: str) -> VideoMetadata:
     }
 
 
-def find_ffmpeg() -> Optional[str]:
-    """Return path to ffmpeg if found on PATH."""
-    path = shutil.which("ffmpeg")
-    return path
+def resolve_resolution(
+    target_w: Optional[int], target_h: Optional[int], src_w: int, src_h: int
+) -> Tuple[int, int]:
+    """
+    解析目標解析度，處理 -1 (自動比例) 的情況。
+    確保回傳的是具體的整數 (w, h)。
+    """
+    # change None to -1 for easier handling
+    target_w = target_w or -1
+    target_h = target_h or -1
 
+    # 如果兩個都是 -1，保持原樣
+    if target_w <= 0 and target_h <= 0:
+        return src_w, src_h
 
-def verify_ffmpeg(ffmpeg_exec: str) -> bool:
-    """Check if path points to a valid ffmpeg executable."""
-    try:
-        proc = subprocess.run(
-            [ffmpeg_exec, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
-        )
-        return proc.returncode == 0 and "ffmpeg version" in proc.stdout.lower()
-    except Exception:
-        return False
+    final_w = target_w
+    final_h = target_h
+
+    # 情況 A: 指定寬度，高度自動 (-1)
+    if target_w > 0 and target_h <= 0:
+        ratio = src_h / src_w
+        final_h = int(target_w * ratio)
+
+    # 情況 B: 指定高度，寬度自動 (-1)
+    elif target_h > 0 and target_w <= 0:
+        ratio = src_w / src_h
+        final_w = int(target_h * ratio)
+
+    # 情況 C: 兩者都指定，直接使用 (可能變形)
+    else:
+        final_w = target_w
+        final_h = target_h
+
+    return int(final_w), int(final_h)
 
 
 # ---------------------------
 # Frame producers
 # ---------------------------
 def extract_with_ffmpeg_pipe(
-    video_path: str, target_fps: float, target_size: Tuple[int, int]
+    video_path: str,
+    ffmpeg_path: str,
+    target_size: Optional[Tuple[int, int]] = None,
+    target_fps: Optional[float] = None,
 ) -> Generator[FrameInfo, Any, None]:
     """
     Stream raw BGR24 frames via ffmpeg stdout pipe.
     Yields (frame_numpy_bgr, frame_index, timestamp_sec).
     """
-    tw, th = target_size or (0, 0)
-    scale_str = f"scale={tw}:{th}" if (tw > 0 and th > 0) else "scale=iw:ih"
-    vf = f"fps={target_fps},{scale_str}"
+    src_meta = get_metadata_cv2(video_path)
+    src_w = src_meta["width"]
+    src_h = src_meta["height"]
+    src_fps = src_meta["fps"]
+
+    tw = src_w  # target width
+    th = src_h  # target height
+    tf = src_fps  # target fps
+
+    vf_args: list[str] = []
+    if target_fps and target_fps != src_fps:
+        vf_args.append(f"fps={target_fps}")
+        tf = target_fps
+    if target_size and target_size != (src_w, src_h):
+        tw, th = target_size
+        vf_args.append(f"scale={tw}:{th}")
+    vf = ["-vf", ",".join(vf_args)] if vf_args else []
 
     # ffmpeg supports bgr24 pixel format which matches OpenCV's default.
     cmd = [
         # fmt: off
-        "ffmpeg",
+        ffmpeg_path,
         "-i", video_path,
-        "-vf", vf,
+        *vf,
         "-f", "rawvideo",
         "-pix_fmt", "bgr24",
         "-vcodec", "rawvideo",
@@ -112,7 +148,7 @@ def extract_with_ffmpeg_pipe(
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     # Calculate frame size in bytes for reading from pipe
-    frame_byte_size = target_size[0] * target_size[1] * 3
+    frame_byte_size = tw * th * 3
     frame_idx = 0
     assert proc.stdout is not None, "ffmpeg process stdout is None"
     try:
@@ -121,8 +157,8 @@ def extract_with_ffmpeg_pipe(
             if not in_bytes or len(in_bytes) < frame_byte_size:
                 break
 
-            frame = np.frombuffer(in_bytes, np.uint8).reshape((target_size[1], target_size[0], 3))
-            timestamp = frame_idx / target_fps
+            frame = np.frombuffer(in_bytes, np.uint8).reshape((th, tw, 3))
+            timestamp = frame_idx / tf
             yield frame, frame_idx, timestamp
             frame_idx += 1
     finally:
@@ -135,7 +171,7 @@ def extract_with_ffmpeg_pipe(
 
 
 def extract_with_cv2_time_based(
-    video_path: str, target_fps: float, target_size: Optional[Tuple[int, int]] = None
+    video_path: str, target_size: Optional[Tuple[int, int]] = None, target_fps: Optional[float] = None
 ) -> Generator[FrameInfo, Any, None]:
     """
     Time-based frame extraction using cv2 to prevent drift.
@@ -149,6 +185,9 @@ def extract_with_cv2_time_based(
     duration = None
     if src_fps > 0 and frame_count > 0:
         duration = frame_count / src_fps
+
+    if target_fps is None:
+        target_fps = src_fps
 
     if duration is None:
         print("Warning: source duration unknown; falling back to full scan sampling.")
@@ -195,15 +234,14 @@ def extract_with_cv2_time_based(
 def process_frames_from_video(
     video_path: str,
     output_size: Optional[Tuple[int, int]],
-    output_fps: float,
-    processing_callback: Callable[[FrameData, FrameIndex, TimestampSec], None],
-    finish_callback: Optional[Callable[[VideoMetadata], None]] = None,
+    output_fps: Optional[float],
+    callback: Callable[[FrameData, FrameIndex, TimestampSec], None],
     max_workers: int = 8,
     prefer_ffmpeg: bool = True,
     ffmpeg_exec_path: Optional[str] = None,
 ):
     """
-    Streams frames (resized & resampled) and dispatches them to user_callback in threads.
+    Streams frames (resized & resampled) and dispatches them to callback in threads.
     Does NOT store output video; frames are processed on the fly.
     """
     meta = get_metadata_cv2(video_path)
@@ -214,52 +252,43 @@ def process_frames_from_video(
         f"[metadata] source size={src_w}x{src_h}, fps={src_fps}, frames={frame_count or 'unknown'}, duration={f'{duration}s' if duration else 'unknown'}"
     )
 
-    if output_size is None:
-        target_size = (src_w, src_h)
-    else:
-        target_size = output_size
-
+    target_size = output_size or (src_w, src_h)
+    target_fps = output_fps or src_fps
     target_frame_count = None
     if duration is not None:
-        target_frame_count = int(math.floor(duration * output_fps + 1e-6))
+        target_frame_count = int(math.floor(duration * target_fps + 1e-6))
     print(
-        f"[processing] target size={target_size[0]}x{target_size[1]}, fps={output_fps}, frames={target_frame_count or 'unknown'}"
+        f"[processing] target size={target_size[0]}x{target_size[1]}, fps={target_fps}, frames_approx={target_frame_count or 'unknown'}"
     )
     meta["width"] = target_size[0]
     meta["height"] = target_size[1]
-    meta["fps"] = output_fps
+    meta["fps"] = target_fps
 
     ffmpeg_available = False
-    ffmpeg_path = find_ffmpeg()
-    if ffmpeg_path:
-        ffmpeg_available = True
-    if ffmpeg_exec_path:
-        if verify_ffmpeg(ffmpeg_exec_path):
+    if prefer_ffmpeg:
+        if not ffmpeg_exec_path:
+            ffmpeg_exec_path = find_ffmpeg()
+        if ffmpeg_exec_path:
+            ffmpeg_available = verify_ffmpeg(ffmpeg_exec_path)
             ffmpeg_available = True
-            ffmpeg_path = ffmpeg_exec_path
-        else:
-            print(f"[ffmpeg] provided path '{ffmpeg_exec_path}' is not a valid ffmpeg executable; ignoring.")
 
-    use_ffmpeg = prefer_ffmpeg and ffmpeg_available
-    if use_ffmpeg:
-        print(f"[ffmpeg] using ffmpeg at: {ffmpeg_path}")
-    else:
-        print("[ffmpeg] not using ffmpeg; fallback to cv2 pipeline.")
-
-    if use_ffmpeg:
-        frames = extract_with_ffmpeg_pipe(
-            video_path=video_path, target_fps=output_fps, target_size=target_size
-        )
+    if ffmpeg_exec_path and ffmpeg_available:
+        print(f"[ffmpeg] using ffmpeg at: {ffmpeg_exec_path}")
+        frames = extract_with_ffmpeg_pipe(video_path, ffmpeg_exec_path, output_size, output_fps)
         via = "ffmpeg -> pipe"
     else:
-        frames = extract_with_cv2_time_based(video_path, output_fps, output_size)
+        if not ffmpeg_available:
+            print("[ffmpeg] ffmpeg not found or invalid; fallback to cv2 pipeline.")
+        else:
+            print("[ffmpeg] not using ffmpeg; fallback to cv2 pipeline.")
+        frames = extract_with_cv2_time_based(video_path, output_size, output_fps)
         via = "cv2 time-based"
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         frame_count = 0
         for frame, idx, ts in frames:
-            futures.append(executor.submit(processing_callback, frame, idx, ts))
+            futures.append(executor.submit(callback, frame, idx, ts))
             frame_count += 1
 
         for f in as_completed(futures):
@@ -269,112 +298,14 @@ def process_frames_from_video(
                 print(f"[worker] exception in callback: {e}", file=sys.stderr)
     print(f"[done] processed {frame_count} frames via {via}.")
 
-    if finish_callback:
-        meta["frame_count"] = frame_count
-        meta["duration"] = frame_count / output_fps
-        finish_callback(meta)
-
-
-# ---------------------------
-# CLI wrapper
-# ---------------------------
-def _ask_size(default_w: int, default_h: int) -> Optional[Tuple[int, int]]:
-    """
-    Interactive size prompt.
-    Accepts: empty (keep), WIDTHxHEIGHT, or WIDTH (auto-height).
-    """
-    prompt = f"Enter target size (e.g. 1280x720) or empty to keep original [{default_w}x{default_h}]: "
-    v = input(prompt).strip()
-    if v == "":
-        return None
-    elif "x" in v:
-        parts = v.lower().split("x")
-        try:
-            w = int(parts[0])
-            h = int(parts[1])
-            return (w, h)
-        except Exception:
-            print("Invalid size format.")
-            return _ask_size(default_w, default_h)
-    else:
-        try:
-            w = int(v)
-            h = int(round(default_h * (w / default_w)))
-            return (w, h)
-        except Exception:
-            print("Invalid number.")
-            return _ask_size(default_w, default_h)
-
-
-def _ask_fps(default_fps: float) -> Optional[float]:
-    prompt = f"Enter target fps (e.g. 24 or 30) or empty to keep original [{default_fps}]: "
-    v = input(prompt).strip()
-    if v == "":
-        return None
-    try:
-        f = float(v)
-        if f <= 0:
-            print("FPS must be positive.")
-            return _ask_fps(default_fps)
-        return f
-    except Exception:
-        print("Invalid fps.")
-        return _ask_fps(default_fps)
-
-
-def process_video_cli(
-    video_path: str,
-    processing_callback: Callable[[FrameData, FrameIndex, TimestampSec], None],
-    finish_callback: Optional[Callable[[VideoMetadata], None]] = None,
-    max_workers: int = 8,
-):
-    """
-    Interactive CLI entrypoint.
-    Detects ffmpeg, asks for settings, and runs processing.
-    """
-    meta = get_metadata_cv2(video_path)
-    print(json.dumps(meta, indent=2))
-    target_size = _ask_size(meta["width"], meta["height"])
-    target_fps = _ask_fps(meta["fps"])
-
-    if target_fps is None:
-        target_fps = meta["fps"] or 30.0
-
-    ffmpeg_path = find_ffmpeg()
-    ffmpeg_exec = None
-    if ffmpeg_path:
-        print(f"Found ffmpeg at: {ffmpeg_path}")
-        ffmpeg_exec = ffmpeg_path
-    else:
-        resp = input(
-            "ffmpeg not found on PATH. Enter path to ffmpeg executable to use it (or press Enter to fallback to cv2): "
-        ).strip()
-        if resp != "":
-            if verify_ffmpeg(resp):
-                ffmpeg_exec = resp
-                print(f"Using ffmpeg at: {ffmpeg_exec}")
-            else:
-                print("Provided path is not valid ffmpeg. Falling back to cv2.")
-        else:
-            print("No ffmpeg provided; fallback to cv2.")
-
-    process_frames_from_video(
-        video_path=video_path,
-        output_size=target_size,
-        output_fps=target_fps,
-        processing_callback=processing_callback,
-        finish_callback=finish_callback,
-        max_workers=max_workers,
-        ffmpeg_exec_path=ffmpeg_exec,
-    )
-    return target_size, target_fps
+    meta["frame_count"] = frame_count
+    meta["duration"] = frame_count / target_fps
+    return meta
 
 
 # ---------------------------
 # Example callback
 # ---------------------------
-
-
 def example_callback(frame: FrameData, index: FrameIndex, timestamp: TimestampSec):
     """
     Example callback: show minimal per-frame stats.
@@ -384,10 +315,6 @@ def example_callback(frame: FrameData, index: FrameIndex, timestamp: TimestampSe
     print(
         f"[frame {index}] timestamp={timestamp:.3f}s, shape={frame.shape}, mean_color={frame.mean(axis=(0, 1))}"
     )
-
-
-def example_finish(meta: VideoMetadata):
-    print(f"[finish] processed video metadata: {meta}")
 
 
 # ---------------------------
@@ -401,6 +328,7 @@ if __name__ == "__main__":
     if not os.path.exists("frame"):
         os.makedirs("frame")
     # call CLI with example callback; replace example_callback with your function
-    process_video_cli(
-        video_file, processing_callback=example_callback, finish_callback=example_finish, max_workers=4
+    meta = process_frames_from_video(
+        video_file, output_size=None, output_fps=None, callback=example_callback, max_workers=4
     )
+    print(f"[finish] processed video metadata: {meta}")

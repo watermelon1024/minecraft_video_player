@@ -4,8 +4,9 @@ if __name__ == "__main__":
 
     from generator.file_utils import PackGenerator, PackMode
 
+    from .cli_utils import ask_metadata
     from .res.callback import finish_callback, processing_callback
-    from .video_utils import process_video_cli
+    from .video_utils import process_frames_from_video
 
     parser = argparse.ArgumentParser(description="Minecraft Video Player Generator")
     parser.add_argument("video_file", help="Path to the video file")
@@ -40,6 +41,8 @@ if __name__ == "__main__":
     if no_resourcepack:
         raise NotImplementedError("Datapack-only generation is not yet supported.")
 
+    target_size, target_fps, ffmpeg_exec = ask_metadata(video_file)
+
     mode = PackMode.ZIP if is_zip else PackMode.FOLDER
 
     datapack_name = "datapack"
@@ -56,10 +59,13 @@ if __name__ == "__main__":
     ) as datapack, PackGenerator(
         resourcepack_name, template_path="template/resourcepack", mode=mode
     ) as resourcepack:
-
-        process_video_cli(
-            video_file,
-            processing_callback=partial(processing_callback, resourcepack=resourcepack),
-            finish_callback=partial(finish_callback, datapack=datapack, resourcepack=resourcepack),
+        meta = process_frames_from_video(
+            video_path=video_file,
+            output_size=target_size,
+            output_fps=target_fps,
+            callback=partial(processing_callback, resourcepack=resourcepack),
             max_workers=16,
+            prefer_ffmpeg=bool(ffmpeg_exec),
+            ffmpeg_exec_path=ffmpeg_exec,
         )
+        finish_callback(meta, datapack, resourcepack)
