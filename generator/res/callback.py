@@ -2,11 +2,11 @@ import math
 import os
 from tempfile import TemporaryDirectory
 
-from .subtitle import generate_subtitle_function
-
+from ..audio_utils import segment_audio
 from ..file_utils import PackGenerator
 from ..video_utils import FrameData, FrameIndex, TimestampSec, VideoMetadata
-from .audio import generate_segmented_sounds_json, segment_audio
+from .audio import generate_segmented_sounds_json
+from .subtitle import generate_subtitle_function
 
 MAX_W = 256
 MAX_H = 256
