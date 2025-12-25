@@ -1,12 +1,15 @@
 import math
 import os
-from tempfile import TemporaryDirectory
+from typing import TypedDict
 
-from ..audio_utils import segment_audio
 from ..file_utils import PackGenerator
 from ..video_utils import FrameData, FrameIndex, TimestampSec, VideoMetadata
-from .audio import generate_segmented_sounds_json
-from .subtitle import generate_subtitle_function
+
+
+class FrameRelatedFunctions(TypedDict):
+    init: str
+    loop: str
+
 
 MAX_W = 256
 MAX_H = 256
@@ -41,7 +44,7 @@ def processing_callback(
             resourcepack.write_image(filepath, tile)
 
 
-def finish_callback(meta: VideoMetadata, datapack: PackGenerator, resourcepack: PackGenerator):
+def generate_frame_related(meta: VideoMetadata, resourcepack: PackGenerator) -> FrameRelatedFunctions:
     """
     Generates custom font json and text_display init mcfunction.
     Uses 1 px = 0.025 blocks measurement for automatic alignment.
@@ -58,7 +61,7 @@ def finish_callback(meta: VideoMetadata, datapack: PackGenerator, resourcepack: 
     fonts: dict[str, list] = {}
     start_char = 0xE000
 
-    print(f"[Info] Generating config... (Grid: {rows} rows x {cols} cols)")
+    print(f"[Info] Generating frame related data... (Grid: {rows} rows x {cols} cols)")
 
     for i in range(total_frames):
         for r in range(rows):
@@ -76,14 +79,14 @@ def finish_callback(meta: VideoMetadata, datapack: PackGenerator, resourcepack: 
                     }
                 )
 
+    font_dir = "assets/video/font"
     for name, providers in fonts.items():
-        json_path = os.path.join("assets/video/font", f"{name}.json")
+        json_path = os.path.join(font_dir, f"{name}.json")
         resourcepack.write_json(json_path, {"providers": providers})
 
-    print("[Done] Generated resource pack config: assets/video/font")
+    print(f"[Done] Generated resourcepack custom font: {font_dir} with {total_frames * rows * cols} entries")
 
-    # --- 2. Output summon commands (Row-based) ---
-    print("[Info] Generating summon commands...")
+    # --- 2. Output commands (Row-based) ---
 
     # Ascent=0 means image grows downwards.
     # Place the first row at Y + total height so the bottom aligns with Y=0.
@@ -122,40 +125,21 @@ def finish_callback(meta: VideoMetadata, datapack: PackGenerator, resourcepack: 
     init_cmds.append("scoreboard players set frame video_player 0")
     init_cmds.append(f"scoreboard players set end_frame video_player {total_frames - 1}")
 
-    # audio segment time (seconds)
-    segment_time = 10
-    init_cmds.append(f"scoreboard players set audio_segment video_player {int(segment_time * fps)}")
-
     if fps != 20:
         init_cmds.append(
-            'tellraw @p ["","Your target FPS is not 20; you need to execute ",{text:"/tick rate %d",bold:true,color:"gold",click_event:{action:"suggest_command",command:"/tick rate %d"}}," to fit the correct playback speed. (Or ",{text:"[Click Here]",color:"gold",click_event:{action:"run_command",command:"tick rate %d"}}," to execute.)"]'
-            % (fps, fps, fps)
+            'tellraw @p ["","Your video FPS is not 20; you need to execute ",{text:"/tick rate %s",bold:true,color:"gold",click_event:{action:"suggest_command",command:"/tick rate %s"}}," to fit the correct playback speed. (Or ",{text:"[Click Here]",color:"gold",click_event:{action:"run_command",command:"tick rate %s"}}," to execute.)"]'
+            % ((f"{fps}",) * 3)
         )
 
-    # subtitle init
-    subtitle_path = "subtitle.srt"
-    if os.path.exists(subtitle_path):
-        init_cmds.append(generate_subtitle_function(subtitle_path, fps, datapack))
+    print(f"[Done] Generated frame init commands: {len(init_cmds)} lines")
 
-    mcfunction_dir = "data/video_player/function"
+    loop_cmds = [
+        f"$data modify entity @s text.extra[{c * 2}].text set from storage video_player:frame frames[$(frame)]"
+        for c in range(cols)
+    ]
+    print(f"[Done] Generated play frame commands: {len(loop_cmds)} lines")
 
-    init_path = os.path.join(mcfunction_dir, "init.mcfunction")
-    datapack.write_text(init_path, "\n".join(init_cmds))
-    print(f"[Done] Generated init commands: {init_path}")
-
-    play_loop_path = os.path.join(mcfunction_dir, "play_frame.mcfunction")
-    datapack.write_text(
-        play_loop_path,
-        "\n".join(
-            f"$data modify entity @s text.extra[{c * 2}].text set from storage video_player:frame frames[$(frame)]"
-            for c in range(cols)
-        ),
-    )
-    print(f"[Done] Generated play frame commands: {play_loop_path}")
-
-    with TemporaryDirectory() as tmpdir:
-        audio_files = segment_audio(meta["path"], tmpdir, segment_time=segment_time)
-        for filename in audio_files:
-            source_path = os.path.join(tmpdir, filename)
-            resourcepack.write_file_from_disk(f"assets/video/sounds/{filename}", source_path)
-        generate_segmented_sounds_json(audio_files, resourcepack, namespace="video")
+    return {
+        "init": "\n".join(init_cmds),
+        "loop": "\n".join(loop_cmds),
+    }

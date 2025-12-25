@@ -1,8 +1,9 @@
 import pysubs2
+
 from ..file_utils import PackGenerator
 
 
-def generate_subtitle_function(subtitle_path: str, fps: float, datapack: PackGenerator) -> str:
+def generate_subtitle_init_mcfunction(subtitle_path: str, fps: float, datapack: PackGenerator) -> str:
     """
     根據影片路徑產生對應的字幕檔路徑
     例如: video/subtitles/{video_filename}_subtitles.srt

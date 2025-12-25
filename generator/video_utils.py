@@ -106,9 +106,9 @@ def resolve_resolution(
 # ---------------------------
 def extract_with_ffmpeg_pipe(
     video_path: str,
-    ffmpeg_path: str,
     target_size: Optional[Tuple[int, int]] = None,
     target_fps: Optional[float] = None,
+    ffmpeg_exec: str = "ffmpeg",
 ) -> Generator[FrameInfo, Any, None]:
     """
     Stream raw BGR24 frames via ffmpeg stdout pipe.
@@ -135,7 +135,7 @@ def extract_with_ffmpeg_pipe(
     # ffmpeg supports bgr24 pixel format which matches OpenCV's default.
     cmd = [
         # fmt: off
-        ffmpeg_path,
+        ffmpeg_exec,
         "-i", video_path,
         *vf,
         "-f", "rawvideo",
@@ -274,7 +274,7 @@ def process_frames_from_video(
 
     if ffmpeg_exec_path and ffmpeg_available:
         print(f"[ffmpeg] using ffmpeg at: {ffmpeg_exec_path}")
-        frames = extract_with_ffmpeg_pipe(video_path, ffmpeg_exec_path, output_size, output_fps)
+        frames = extract_with_ffmpeg_pipe(video_path, output_size, output_fps, ffmpeg_exec_path)
         via = "ffmpeg -> pipe"
     else:
         if not ffmpeg_available:
