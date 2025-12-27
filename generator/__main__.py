@@ -169,7 +169,7 @@ if __name__ == "__main__":
             init_cmds.append(generate_subtitle_init_mcfunction(subs, fps))
             print(f"[Done] Generated subtitles with {len(subs)} entries.")
         else:
-            init_cmds.append("data merge storage video_player:subtitle {}")  # empty subtitles
+            init_cmds.append("data modify storage video_player:subtitle subtitle set value {}")  # empty subtitles
             print("[Info] No subtitles found, skipping subtitle generation.")
 
         # save mcfunctions
