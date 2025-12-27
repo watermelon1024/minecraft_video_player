@@ -32,6 +32,13 @@ if __name__ == "__main__":
         help="Path to the subtitle file (.srt, .ass, etc.)",
     )
     parser.add_argument(
+        "-ss",
+        "--subtitle-scale",
+        type=float,
+        default=2.0,
+        help="Scale for subtitle text display (default: 2.0)",
+    )
+    parser.add_argument(
         "-ns",
         "--no-subtitle",
         action="store_true",
@@ -77,6 +84,7 @@ if __name__ == "__main__":
 
     video_file = args.video
     subtitle_file = args.subtitle
+    subtitle_scale = args.subtitle_scale
     no_subtitle = args.no_subtitle
     use_zip = not args.no_zip
     no_resourcepack = args.no_resourcepack
@@ -166,10 +174,11 @@ if __name__ == "__main__":
             )
 
         if subs:
-            init_cmds.append(generate_subtitle_init_mcfunction(subs, fps))
+            init_cmds.append(generate_subtitle_init_mcfunction(subs, fps, scale=subtitle_scale))
             print(f"[Done] Generated subtitles with {len(subs)} entries.")
         else:
-            init_cmds.append("data modify storage video_player:subtitle subtitle set value {}")  # empty subtitles
+            # empty subtitles
+            init_cmds.append("data modify storage video_player:subtitle subtitle set value {}")
             print("[Info] No subtitles found, skipping subtitle generation.")
 
         # save mcfunctions
