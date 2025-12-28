@@ -26,24 +26,24 @@ A powerful tool that converts video files into Minecraft Datapacks and Resourcep
 
 1. **Clone the repository**
 
-```bash
-git clone https://github.com/yourusername/minecraft_video_player.git
-cd minecraft_video_player
-```
+    ```bash
+    git clone https://github.com/yourusername/minecraft_video_player.git
+    cd minecraft_video_player
+    ```
 
 1. **Install Python dependencies**
 
-- If you have ffmpeg installed:
+   - If you have ffmpeg installed:
 
-```bash
-pip install -r requirements.txt
-```
+       ```bash
+       pip install -r requirements.txt
+       ```
 
-- If you do not have ffmpeg installed:
+   - If you do not have ffmpeg installed:
 
-```bash
-pip install -r requirements_audio.txt
-```
+       ```bash
+       pip install -r requirements_audio.txt
+       ```
 
 ## Usage
 
@@ -63,7 +63,7 @@ python -m generator "path/to/video.mp4" [options]
 - `-w`, `--workers <int>`: Number of worker threads (default: 16).
 - `-nz`, `--no-zip`: Generate folders instead of zip files.
 
-Use `-h` or `--help` to see all available options.
+    Use `-h` or `--help` to see all available options.
 
 **Example:**
 
